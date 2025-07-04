@@ -27,6 +27,7 @@
 
 #ifdef REPORT_RWLOCK_CONTENTION
 # define _GNU_SOURCE
+# include <backtrace.h>
 # include <execinfo.h>
 # include <fcntl.h>
 # include <unistd.h>
@@ -617,11 +618,12 @@ pthread_mutex_t log_lock = PTHREAD_MUTEX_INITIALIZER;
 CRYPTO_THREAD_LOCAL thread_contention_data;
 
 struct stack_info {
-    unsigned int nptrs;
-    int write;
     OSSL_TIME start;
     OSSL_TIME duration;
-    char **strings;
+    unsigned int bt_len;
+    unsigned int bt_sz;
+    char *bt;
+    int write;
 };
 
 #  define STACKS_COUNT 32
@@ -629,7 +631,59 @@ struct stack_traces {
     int fd;
     int lock_depth;
     size_t idx;
+    struct backtrace_state *bt_state;
     struct stack_info stacks[STACKS_COUNT];
+};
+
+
+static void bt_error_callback(void *data, const char *message, int error_number)
+{
+    fprintf(stderr, "Backtrace error %d: %s\n", error_number, message);
+};
+
+# ifndef MAX
+#  define MAX(a, b)             (((a) > (b)) ? (a) : (b))
+# endif
+# ifndef MIN
+#  define MIN(a, b)             (((a) < (b)) ? (a) : (b))
+# endif
+static int bt_full_callback(void *data, uintptr_t pc, const char *pathname,
+                            int line_number, const char *function)
+{
+    struct stack_info *si = data;
+    int strsz;
+
+    if (!si->bt_sz) {
+        si->bt_len = 0;
+        si->bt_sz = 256;
+	si->bt = malloc(si->bt_sz);
+    }
+
+    strsz = snprintf(si->bt + si->bt_len, si->bt_sz - si->bt_len,
+		     "  %s:%d(%s) [%" PRIxPTR "]\n",
+                     pathname, line_number, function, pc);
+
+    if (strsz < 0)
+        return -1;
+
+    if (strsz < (si->bt_sz - si->bt_len)) {
+        si->bt_len += strsz;
+    } else {
+        unsigned int increment = MAX(MIN(si->bt_sz, 8192), strsz + 1);
+        char *newbt = realloc(si->bt, si->bt_sz + increment);
+
+        if (!newbt)
+            return -1;
+
+	si->bt = newbt;
+	si->bt_sz += increment;
+        snprintf(si->bt + si->bt_len, si->bt_sz - si->bt_len,
+		 "  %s:%d(%s) [%" PRIxPTR "]\n",
+                 pathname, line_number, function, pc);
+	si->bt_len += strsz;
+    }
+
+    return 0;
 };
 
 #  ifdef FIPS_MODULE
@@ -648,6 +702,7 @@ static void *init_contention_data()
 	     gettid());
 
     traces->fd = open(fname, O_WRONLY | O_APPEND | O_CLOEXEC | O_CREAT, 0600);
+    traces->bt_state = backtrace_create_state(NULL, 0, bt_error_callback, NULL);
 
     return traces;
 }
@@ -657,6 +712,11 @@ static void destroy_contention_data(void *data)
     struct stack_traces *st = data;
 
     close(st->fd);
+    for (size_t i = 0; i < STACKS_COUNT; i++) {
+        free(st->stacks[i].bt);
+        st->stacks[i].bt = NULL;
+    }
+
     OPENSSL_free(data);
 }
 
@@ -732,7 +792,6 @@ CRYPTO_RWLOCK *CRYPTO_THREAD_lock_new(void)
 # ifdef REPORT_RWLOCK_CONTENTION
 static void print_stack_traces(struct stack_traces *traces)
 {
-    unsigned int j;
     struct iovec *iov;
     int iovcnt;
 
@@ -743,18 +802,14 @@ static void print_stack_traces(struct stack_traces *traces)
                 ossl_time2us(traces->stacks[traces->idx].duration),
                 ossl_time2us(traces->stacks[traces->idx].start),
                 gettid());
-        if (traces->stacks[traces->idx].strings != NULL) {
+        if (traces->stacks[traces->idx].bt_len) {
             static const char lf = '\n';
-            iovcnt = traces->stacks[traces->idx].nptrs * 2 + 1;
+            iovcnt = 2;
             iov = alloca(iovcnt * sizeof(*iov));
-            for (j = 0; j < traces->stacks[traces->idx].nptrs; j++) {
-                iov[2 * j].iov_base = traces->stacks[traces->idx].strings[j];
-		iov[2 * j].iov_len = strlen(traces->stacks[traces->idx].strings[j]);
-                iov[2 * j + 1].iov_base = (char *) &lf;
-		iov[2 * j + 1].iov_len = 1;
-	    }
-            iov[traces->stacks[traces->idx].nptrs * 2].iov_base = (char *) &lf;
-            iov[traces->stacks[traces->idx].nptrs * 2].iov_len = 1;
+            iov[0].iov_base = traces->stacks[traces->idx].bt;
+	    iov[0].iov_len = traces->stacks[traces->idx].bt_len;
+            iov[1].iov_base = (char *) &lf;
+	    iov[1].iov_len = 1;
         } else {
             static const char no_bt[] = "No stack trace available\n\n";
 	    iovcnt = 1;
@@ -763,7 +818,7 @@ static void print_stack_traces(struct stack_traces *traces)
 	    iov[0].iov_len = sizeof(no_bt) - 1;
         }
         writev(traces->fd, iov, iovcnt);
-        free(traces->stacks[traces->idx].strings);
+	traces->stacks[traces->idx].bt_len = 0;
     }
 }
 # endif
@@ -782,7 +837,6 @@ __owur int CRYPTO_THREAD_read_lock(CRYPTO_RWLOCK *lock)
     }
     traces->lock_depth++;
     if (pthread_rwlock_tryrdlock(lock)) {
-        void *buffer[BT_BUF_SIZE];
         OSSL_TIME start, end;
 
         start = ossl_time_now();
@@ -790,9 +844,8 @@ __owur int CRYPTO_THREAD_read_lock(CRYPTO_RWLOCK *lock)
             return 0;
         end = ossl_time_now();
         traces->stacks[traces->idx].duration = ossl_time_subtract(end, start);
-        traces->stacks[traces->idx].nptrs = backtrace(buffer, BT_BUF_SIZE);
-        traces->stacks[traces->idx].strings = backtrace_symbols(buffer,
-                                                                traces->stacks[traces->idx].nptrs);
+	backtrace_full(traces->bt_state, 0, bt_full_callback, bt_error_callback,
+                       traces->stacks + traces->idx);
         traces->stacks[traces->idx].duration = ossl_time_subtract(end, start);
         traces->stacks[traces->idx].start = start;
         traces->stacks[traces->idx].write = 0;
@@ -828,7 +881,6 @@ __owur int CRYPTO_THREAD_write_lock(CRYPTO_RWLOCK *lock)
     }
     traces->lock_depth++;
     if (pthread_rwlock_trywrlock(lock)) {
-        void *buffer[BT_BUF_SIZE];
         OSSL_TIME start, end;
 
         if (ossl_unlikely(traces == NULL)) {
@@ -839,9 +891,8 @@ __owur int CRYPTO_THREAD_write_lock(CRYPTO_RWLOCK *lock)
         if (!ossl_assert(pthread_rwlock_wrlock(lock) == 0))
             return 0;
         end = ossl_time_now();
-        traces->stacks[traces->idx].nptrs = backtrace(buffer, BT_BUF_SIZE);
-        traces->stacks[traces->idx].strings = backtrace_symbols(buffer,
-                                                                traces->stacks[traces->idx].nptrs);
+	backtrace_full(traces->bt_state, 0, bt_full_callback, bt_error_callback,
+                       traces->stacks + traces->idx);
         traces->stacks[traces->idx].duration = ossl_time_subtract(end, start);
         traces->stacks[traces->idx].start = start;
         traces->stacks[traces->idx].write = 1;
