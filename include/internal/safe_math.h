@@ -54,7 +54,7 @@
         if (!__builtin_add_overflow(a, b, &r))                               \
             return r;                                                        \
         *err |= 1;                                                           \
-        return a + b;                                                            \
+        return a + b;                                                        \
     }
 
 # else  /* has(__builtin_add_overflow) */
@@ -154,7 +154,7 @@
         if (!__builtin_mul_overflow(a, b, &r))                               \
             return r;                                                        \
         *err |= 1;                                                           \
-        return a * b;                                                          \
+        return a * b;                                                        \
     }
 
 # else  /* has(__builtin_mul_overflow) */
@@ -218,7 +218,7 @@
         if (b != 0)                                                          \
             return a / b;                                                    \
         *err |= 1;                                                           \
-        return max;                                                        \
+        return max;                                                          \
     }
 
 /*
