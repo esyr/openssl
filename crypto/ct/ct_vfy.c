@@ -14,6 +14,8 @@
 #include <openssl/evp.h>
 #include <openssl/x509.h>
 
+#include "internal/common.h" /* For s2n and l2n3 */
+
 #include "ct_local.h"
 
 typedef enum sct_signature_type_t {

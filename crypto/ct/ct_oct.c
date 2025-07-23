@@ -19,6 +19,8 @@
 #include <openssl/ct.h>
 #include <openssl/err.h>
 
+#include "internal/common.h" /* For n2s, s2n, n2l8, and l2n8 */
+
 #include "ct_local.h"
 
 int o2i_SCT_signature(SCT *sct, const unsigned char **in, size_t len)
