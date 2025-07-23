@@ -11,6 +11,7 @@
 # define OSSL_INTERNAL_SAFE_MATH_H
 # pragma once
 
+# include <limits.h>                     /* For CHAR_BIT */
 # include <openssl/e_os2.h>              /* For 'ossl_inline' */
 # include "internal/common.h"            /* For 'ossl_likely'/'ossl_unlikely' */
 
@@ -181,12 +182,18 @@
         return (a < 0) ^ (b < 0) ? min : max;                                \
     }
 
+/*
+ * A small optimisation:  there is no need to check for unsigned multiplication
+ * overflow if neither of the operands is at least half the type size.
+ */
 #  define OSSL_SAFE_MATH_MULU(type_name, type, max) \
     static ossl_inline ossl_unused type safe_mul_ ## type_name(type a,       \
                                                                type b,       \
                                                                int *err)     \
     {                                                                        \
-        if (ossl_unlikely(b != 0 && a > max / b))                            \
+        if (ossl_unlikely(((a | b)                                           \
+                           >= ((type) 1 << (sizeof(type) * (CHAR_BIT / 2)))) \
+                          && b != 0 && a > max / b))                         \
             *err |= 1;                                                       \
         return a * b;                                                        \
     }
@@ -407,7 +414,7 @@
     }
 
 /* Calculate ranges of types */
-# define OSSL_SAFE_MATH_MINS(type) ((type)1 << (sizeof(type) * 8 - 1))
+# define OSSL_SAFE_MATH_MINS(type) ((type)1 << (sizeof(type) * CHAR_BIT - 1))
 # define OSSL_SAFE_MATH_MAXS(type) (~OSSL_SAFE_MATH_MINS(type))
 # define OSSL_SAFE_MATH_MAXU(type) (~(type)0)
 
