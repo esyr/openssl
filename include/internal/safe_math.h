@@ -442,4 +442,7 @@
     OSSL_SAFE_MATH_NEGU(type_name, type)                                \
     OSSL_SAFE_MATH_ABSU(type_name, type)
 
+/* Undefine locally-defined helper macros to avoid namespace pollution */
+# undef has
+
 #endif                          /* OSSL_INTERNAL_SAFE_MATH_H */
