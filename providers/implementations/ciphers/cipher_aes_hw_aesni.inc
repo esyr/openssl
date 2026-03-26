@@ -1,5 +1,5 @@
 /*
- * Copyright 2001-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2001-2025 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -8,14 +8,11 @@
  */
 
 /*-
- * AES-NI support for AES modes ecb, cbc, ofb, cfb, ctr.
+ * AES-NI support for AES modes ecb, cbc, ofb, ctr.
  * This file is included by cipher_aes_hw.c
  */
 
 #define cipher_hw_aesni_ofb128 ossl_cipher_hw_generic_ofb128
-#define cipher_hw_aesni_cfb128 ossl_cipher_hw_generic_cfb128
-#define cipher_hw_aesni_cfb8   ossl_cipher_hw_generic_cfb8
-#define cipher_hw_aesni_cfb1   ossl_cipher_hw_generic_cfb1
 #define cipher_hw_aesni_ctr    ossl_cipher_hw_generic_ctr
 
 static int cipher_hw_aesni_initkey(PROV_CIPHER_CTX *dat,

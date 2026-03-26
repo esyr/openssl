@@ -584,11 +584,14 @@ In the following list, always the non-default variant is documented: if
 feature `xxxx` is disabled by default then `enable-xxxx` is documented and
 if feature `xxxx` is enabled by default then `no-xxxx` is documented.
 
-### no-afalgeng
+### enable-static-vcruntime
 
-Don't build the AFALG engine.
+Build binaries that do not require that VC runtimes are installed
 
-This option will be forced on a platform that does not support AFALG.
+This option will produce binaries that are "self contained", that do not
+depend upon VC runtime libraries being installed, so can be used on any
+computer running MS Windows.  Without this option, the build will produce
+binaries that rely on the VC runtimes being installed and available.
 
 ### enable-ktls
 
@@ -715,12 +718,6 @@ this option will reduce run-time memory usage but it also introduces a
 significant performance penalty.  This option is primarily designed to help
 with detecting incorrect reference counting.
 
-### no-capieng
-
-Don't build the CAPI engine.
-
-This option will be forced if on a platform that does not support CAPI.
-
 ### no-cmp
 
 Don't build support for Certificate Management Protocol (CMP)
@@ -741,9 +738,10 @@ the zlib or `zlib-dynamic` options are also chosen.
 
 This now only enables the `failed-malloc` feature.
 
-### enable-crypto-mdebug-backtrace
+### enable-allocfail-tests
 
-This is a no-op; the project uses the compiler's address/leak sanitizer instead.
+This option enables testing that leverages the use of the crypto-mdebug feature
+to test error paths resulting from failed memory allocations.
 
 ### no-ct
 
@@ -768,32 +766,21 @@ Don't build and install documentation, i.e. manual pages in various forms.
 
 Don't build support for loading Dynamic Shared Objects (DSO)
 
-### enable-devcryptoeng
+### enable-tls-deprecated-ec
 
-Build the `/dev/crypto` engine.
-
-This option is automatically selected on the BSD platform, in which case it can
-be disabled with `no-devcryptoeng`.
-
-### no-dynamic-engine
-
-Don't build the dynamically loaded engines.
-
-This only has an effect in a shared build.
-
-### no-ec
-
-Don't build support for Elliptic Curves.
-
-### no-ec2m
-
-Don't build support for binary Elliptic Curves
-
-### no-tls-deprecated-ec
-
-Disable legacy TLS EC groups that were deprecated in RFC8422.  These are the
+Enable legacy TLS EC groups that were deprecated in RFC8422.  These are the
 Koblitz curves, B<secp160r1>, B<secp160r2>, B<secp192r1>, B<secp224r1>, and the
 binary Elliptic curves that would also be disabled by C<no-ec2m>.
+
+### enable-ec_expicit_curves
+
+Enable support for explictitly specified elliptic curves not matching the
+well-known ones. Until this option is on, such curves can't be instantiated
+from ASN.1 formats.
+
+### no-ech
+
+Don't build support for Encrypted Client Hello (ECH) extension.
 
 ### enable-ec_nistp_64_gcc_128
 
@@ -811,10 +798,6 @@ This option is only supported on platforms:
 ### enable-egd
 
 Build support for gathering entropy from the Entropy Gathering Daemon (EGD).
-
-### no-engine
-
-Don't build support for loading engines.
 
 ### no-err
 
@@ -899,21 +882,9 @@ Disabling this also disables the legacy algorithms: MD2 (already disabled by def
 
 Don't generate dependencies.
 
-### no-ml-dsa
-
-Disable Module-Lattice-Based Digital Signature Standard (ML-DSA) support.
-ML-DSA is based on CRYSTALS-DILITHIUM. See [FIPS 204].
-
-### no-ml-kem
-
-Disable Module-Lattice-Based Key-Encapsulation Mechanism Standard (ML-KEM)
-support.  ML-KEM is based on CRYSTALS-KYBER. See [FIPS 203].
-
 ### no-module
 
-Don't build any dynamically loadable engines.
-
-This also implies `no-dynamic-engine`.
+Don't build any dynamically loadable modules.
 
 ### no-multiblock
 
@@ -928,14 +899,6 @@ Don't build support for the Next Protocol Negotiation (NPN) TLS extension.
 ### no-ocsp
 
 Don't build support for Online Certificate Status Protocol (OCSP).
-
-### no-padlockeng
-
-Don't build the padlock engine.
-
-### no-hw-padlock
-
-As synonym for `no-padlockeng`.  Deprecated and should not be used.
 
 ### no-pic
 
@@ -998,11 +961,6 @@ Do not create shared libraries, only static ones.
 
 See [Notes on shared libraries](#notes-on-shared-libraries) below.
 
-### no-slh-dsa
-
-Disable Stateless Hash Based Digital Signature Standard support.
-(SLH-DSA is based on SPHINCS+. See [FIPS 205])
-
 ### no-sm2-precomp
 
 Disable using the SM2 precomputed table on aarch64 to make the library smaller.
@@ -1042,12 +1000,6 @@ This removes the `-trace` option from `s_client` and `s_server`, and omits the
 `SSL_trace()` function from libssl.
 
 Disabling `ssl-trace` may provide a small reduction in libssl binary size.
-
-### no-static-engine
-
-Don't build the statically linked engines.
-
-This only has an impact when not built "shared".
 
 ### no-stdio
 
@@ -1199,8 +1151,8 @@ Don't build support for negotiating the specified SSL/TLS protocol.
 
 If `no-tls` is selected then all of `tls1`, `tls1_1`, `tls1_2` and `tls1_3`
 are disabled.
-Similarly `no-dtls` will disable `dtls1` and `dtls1_2`.  The `no-ssl` option is
-synonymous with `no-ssl3`.  Note this only affects version negotiation.
+Similarly `no-dtls` will disable `dtls1` and `dtls1_2`.
+`no-ssl` and `no-ssl3` are deprecated and do nothing.
 OpenSSL will still provide the methods for applications to explicitly select
 the individual protocol versions.
 
@@ -1216,22 +1168,30 @@ Analogous to `no-{protocol}` but in addition do not build the methods for
 applications to explicitly select individual protocol versions.  Note that there
 is no `no-tls1_3-method` option because there is no application method for
 TLSv1.3.
+`no-ssl3` is deprecated and does nothing.
 
 Using individual protocol methods directly is deprecated.  Applications should
 use `TLS_method()` instead.
 
 ### enable-{algorithm}
 
-    enable-{md2|rc5}
+    enable-{md2|rc5|lms}
 
 Build with support for the specified algorithm.
+
+The `lms` algorithm support is currently limited to verification only as per
+[SP 800-208](https://csrc.nist.gov/pubs/sp/800/208/final).
 
 ### no-{algorithm}
 
     no-{aria|bf|blake2|camellia|cast|chacha|cmac|
-        des|dh|dsa|ecdh|ecdsa|idea|md4|mdc2|ml-dsa|
-        ml-kem|ocb|poly1305|rc2|rc4|rmd160|scrypt|
-        seed|siphash|siv|sm2|sm3|sm4|whirlpool}
+        des|dh|dsa|
+        ec|ec2m|ecdh|ecdsa|hmac-drbg-kdf|idea|kbkdf|krb5kdf|
+        md4|mdc2|
+        ml-dsa|ml-kem|
+        ocb|poly1305|pvkkdf|rc2|rc4|rmd160|scrypt|
+        seed|siphash|siv|slh-dsa|sm2|sm3|sm4|snmpkdf|srtpkdf|sshkdf|sskdf|
+        x942kdf|x963kdf|whirlpool}
 
 Build without support for the specified algorithm.
 
@@ -1537,7 +1497,6 @@ its default):
                    to build your own programs that use libcrypto
                    or libssl.
     lib            Contains the OpenSSL library files.
-    lib/engines    Contains the OpenSSL dynamically loadable engines.
 
     share/man/man1 Contains the OpenSSL command line man-pages.
     share/man/man3 Contains the OpenSSL library calls man-pages.
@@ -1563,8 +1522,6 @@ its default):
                    to build your own programs that use libcrypto
                    or libssl.
     [.LIB.'arch']  Contains the OpenSSL library files.
-    [.ENGINES'sover''pz'.'arch']
-                   Contains the OpenSSL dynamically loadable engines.
     [.SYS$STARTUP] Contains startup, login and shutdown scripts.
                    These define appropriate logical names and
                    command symbols.
@@ -1585,7 +1542,7 @@ for you convenience:
 
 The installation directory should be appropriately protected to ensure
 unprivileged users cannot make changes to OpenSSL binaries or files, or
-install engines.  If you already have a pre-installed version of OpenSSL as
+install providers.  If you already have a pre-installed version of OpenSSL as
 part of your Operating System it is recommended that you do not overwrite
 the system version and instead install to somewhere else.
 

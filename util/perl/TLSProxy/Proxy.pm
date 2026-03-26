@@ -1,4 +1,4 @@
-# Copyright 2016-2025 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2016-2026 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -97,7 +97,23 @@ sub new_dtls {
 
 sub init
 {
-    require IO::Socket::IP;
+    my $useSockInet = 0;
+    eval {
+        require IO::Socket::IP;
+        my $s = IO::Socket::IP->new(
+                LocalAddr => "::1",
+                LocalPort => 0,
+                Listen=>1,
+                );
+            $s or die "\n";
+            $s->close();
+    };
+    if ($@ eq "") {
+        require IO::Socket::IP;
+    } else {
+        $useSockInet = 1;
+    }
+
     my $class = shift;
     my ($filter,
         $execute,
@@ -108,18 +124,23 @@ sub init
     my $test_client_port;
 
     # Sometimes, our random selection of client ports gets unlucky
-    # And we randomly select a port thats already in use.  This causes
+    # And we randomly select a port that's already in use.  This causes
     # this test to fail, so lets harden ourselves against that by doing
     # a test bind to the randomly selected port, and only continue once we
-    # find a port thats available.
+    # find a port that's available.
     my $test_client_addr = $have_IPv6 ? "[::1]" : "127.0.0.1";
     my $found_port = 0;
     for (my $i = 0; $i <= 10; $i++) {
         $test_client_port = 49152 + int(rand(65535 - 49152));
         my $test_sock;
         if ($useINET6 == 0) {
-            $test_sock = IO::Socket::IP->new(LocalPort => $test_client_port,
-                                             LocalAddr => $test_client_addr);
+            if ($useSockInet == 0) {
+                $test_sock = IO::Socket::IP->new(LocalPort => $test_client_port,
+                                                 LocalAddr => $test_client_addr);
+            } else {
+                $test_sock = IO::Socket::INET->new(LocalAddr => $test_client_addr,
+                                                   LocalPort => $test_client_port);
+            }
         } else {
             $test_sock = IO::Socket::INET6->new(LocalAddr => $test_client_addr,
                                                 LocalPort => $test_client_port,
@@ -254,6 +275,16 @@ sub start
     my ($self) = shift;
     my $pid;
 
+    #
+    # s390x is a somewhat special case here.  It uses hw acceleration under
+    # the covers when computing MACs, and in so doing avoids the use of the
+    # needed ossltest provider when computing the underlying digest.  Since
+    # TLSProxy needs the ossltest provider to compute reliable known data in
+    # the digest, we disable MAC hw acceleration here to ensure that the provider
+    # gets used, just as it does with other architectures.
+    #
+    $ENV{OPENSSL_s390xcap} = "kmac:~0:~f000";
+
     # Create the Proxy socket
     my $proxaddr = $self->{proxy_addr};
     $proxaddr =~ s/[\[\]]//g; # Remove [ and ]
@@ -297,9 +328,9 @@ sub start
     }
 
     my $execcmd = $self->execute
-        ." s_server -no_comp -engine ossltest -state"
+        ." s_server -no_comp -provider=p_ossltest -provider=default -propquery ?provider=p_ossltest -state"
         #In TLSv1.3 we issue two session tickets. The default session id
-        #callback gets confused because the ossltest engine causes the same
+        #callback gets confused because the ossltest provider causes the same
         #session id to be created twice due to the changed random number
         #generation. Using "-ext_cache" replaces the default callback with a
         #different one that doesn't get confused.
@@ -338,7 +369,7 @@ sub start
     # Process the output from s_server until we find the ACCEPT line, which
     # tells us what the accepting address and port are.
     while (<>) {
-        print;
+        print STDERR $_;
         s/\R$//;                # Better chomp
         next unless (/^ACCEPT\s.*:(\d+)$/);
         $self->{server_port} = $1;
@@ -359,7 +390,7 @@ sub start
     my $error;
     $pid = undef;
     if (eval { require Win32::Process; 1; }) {
-        if (Win32::Process::Create(my $h, $^X, "perl -ne print", 0, 0, ".")) {
+        if (Win32::Process::Create(my $h, $^X, 'perl -ne "print STDERR $_"', 0, 0, ".")) {
             $pid = $h->GetProcessID();
             $self->{proc_handle} = $h;  # hold handle till next round [or exit]
         } else {
@@ -367,7 +398,7 @@ sub start
         }
     } else {
         if (defined($pid = fork)) {
-            $pid or exec("$^X -ne print") or exit($!);
+            $pid or exec($^X, '-ne', 'print STDERR $_') or exit($!);
         } else {
             $error = $!;
         }
@@ -402,7 +433,7 @@ sub clientstart
     if ($self->execute) {
         my $pid;
         my $execcmd = $self->execute
-             ." s_client -engine ossltest"
+             ." s_client -provider=p_ossltest -provider=default -propquery ?provider=p_ossltest"
              ." -connect $self->{proxy_addr}:$self->{proxy_port}";
         if ($self->{isdtls}) {
             $execcmd .= " -dtls -max_protocol DTLSv1.2"
